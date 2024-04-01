@@ -1,7 +1,10 @@
 import torch
+from torch import nn, save, load
 import torchaudio
-from torchaudio.transforms import FFTConvolve, Spectrogram, Resample, TimeStretch, TimeMasking, FrequencyMasking
+from torchaudio import transforms
+from torchaudio.transforms import FFTConvolve, Spectrogram, Resample, TimeStretch, TimeMasking, FrequencyMasking, MelScale
 from torch.utils.data import Dataset, DataLoader
+from torch.optim import Adam
 import numpy as np
 import pandas as pd
 import wave
@@ -64,6 +67,8 @@ def plot_spectrogram(specgram, title=None, ylabel="freq_bin", ax=None):
     ax.set_ylabel(ylabel)
     ax.imshow(librosa.power_to_db(specgram), origin="lower", aspect="auto", interpolation="nearest")
 
+
+# Neural Network
 class AudioPipeline(torch.nn.Module):
     def __init__(
             self,
@@ -88,18 +93,64 @@ class AudioPipeline(torch.nn.Module):
         return spec
 
 
+# Dataset Class
 class AudioDataset(Dataset):
-    def __init__(self, audio_dir):
+    def __init__(self, audio_dir, transform=None):
         self.audio_dir = audio_dir
+        self.transform = transform
 
     def __len__(self):
         return len(os.listdir(self.audio_dir))
 
     def __getitem__(self, idx):
         audio_path = os.path.join(self.audio_dir, os.listdir(self.audio_dir)[idx])
-        audio = torchaudio.load(audio_path)
-        return audio
+        waveform, sample_rate = torchaudio.load(audio_path)
+        if self.transform:
+            waveform = self.transform(waveform)
+        return waveform
 
+
+class AudioDiffusion(torch.nn.Module):
+    def __init__(self,
+                 input_freq=44100,
+                 resample_freq=16000,
+                 n_fft=1024,
+                 n_mel=256,
+                 stretch_factor=0.8):
+        super(AudioDiffusion, self).__init__()
+        # TODO diffusion model
+        self.resample = Resample(orig_freq=input_freq, new_freq=resample_freq)
+
+        self.spec = Spectrogram(n_fft=n_fft, power=2)
+
+        self.spec_aug = torch.nn.Sequential(
+            TimeStretch(stretch_factor, fixed_rate=True),
+            FrequencyMasking(freq_mask_param=80),
+            TimeMasking(time_mask_param=80),
+        )
+
+        self.mel_scale = MelScale(n_mels=n_mel, sample_rate=resample_freq, n_stft=n_fft // 2 + 1)
+
+        self.linear_relu_stack = nn.Sequential(
+            nn.Conv1d(in_channels=64, out_channels=64, kernel_size=3, stride=1, padding=1),
+            nn.ReLU(),
+            nn.Conv1d(in_channels=64, out_channels=1, kernel_size=3, stride=1, padding=1)
+        )
+    def forward(self, waveform):
+        # TODO forward pass
+        # Resample the input
+        #resampled = self.resample(waveform)
+
+        # Convert to power spectrogram
+        #spec = self.spec(resampled)
+
+        # Apply SpecAugment
+        #spec = self.spec_aug(spec)
+
+        # Convert to mel-scale
+        #mel = self.mel_scale(spec)
+        logits = self.linear_relu_stack(waveform)
+        return logits
 
 # Play audio given signal x time data and a sample rate
 def play(data, sr):
@@ -154,31 +205,35 @@ if __name__ == '__main__':
     if device == "cuda":
         print(f"Running on {torch.cuda.get_device_name(device)}")
 
-    pipeline = AudioPipeline()
-    pipeline.to(device)
-    print(pipeline)
+    transform = None #transforms.Spectrogram(n_fft=1024, power=2)
+    audio_dataset = AudioDataset("D:/datasets/ESC-50/203 - Crackling fire", transform)
+    dataset = DataLoader(audio_dataset, batch_size=64, shuffle=True)
 
-    data, sr = torchaudio.load("D:/datasets/ESC-50/203 - Crackling fire/1-4211-A.ogg")
-    '''spectrogram = Spectrogram(n_fft=512)
-    spec = spectrogram(data)
-
-    fig, axs = plt.subplots(2, 1)
-    plot_waveform(data, sr, ax=axs[0])
-    plot_spectrogram(spec[0], ax=axs[1])
-    #print(spec[0])
-    fig.tight_layout()
-    plt.show()'''
-
-    for name, param in pipeline.named_parameters():
-        print(f"Layer: {name} | Size: {param.size()} | Values : {param[:2]} \n")
-
-    training_data = AudioDataset("D:/datasets/ESC-50/203 - Crackling fire")
-    train_dataloader = DataLoader(training_data, shuffle=True)
-    #features = pipeline(data.to(device))
-    #print(features)
+    diffusion_model = AudioDiffusion().to(device)
+    loss_fn1 = nn.CrossEntropyLoss()
+    optimizer = Adam(diffusion_model.parameters())
     epochs = 10
-    for t in range(epochs):
-        print(f"Epoch {t+1}\n-------------------------------")
-        train_loop(train_dataloader, pipeline)
+    for epoch in range(epochs):
+        #train_loop(dataset, pipeline)
+        for batch in dataset:
+            X, y = batch
+            X, y = X.to(device), y.to(device)
+            yhat = diffusion_model(X)
+            loss = loss_fn1(yhat, y)
+            optimizer.zero_grad()
+            loss.backward()
+            optimizer.step()
+            '''X, y = batch
+            X, y = X.to(device), y.to(device)
+            yhat = pipeline(X)
+            loss = loss_fn(yhat, y)
+
+            # Backpropogate
+            opt.zero_grad()
+            loss.backward()
+            opt.step()'''
+        print(f"Epoch {epoch} loss is {loss.item()}")
+    with open("model_state.pt", "wb") as f:
+        save(diffusion_model.state_dict(), f)
     print("Done!")
 
