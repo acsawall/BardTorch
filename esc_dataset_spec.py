@@ -8,15 +8,15 @@ from torchvision.transforms import ToPILImage
 import numpy as np
 import pandas as pd
 import os
-from PIL import Image
+from PIL import Image, ImageShow
 
 
-AUDIO_DIR = "D:/datasets/ESC-50"
+
 
 
 class ESCDataset(Dataset):
 
-    def __init__(self, audio_dir, transform, target_sample_rate):
+    def __init__(self, audio_dir, transform, target_sample_rate, num_samples, device):
         self.audio_dir = audio_dir
         annotations = pd.DataFrame(columns=["folder", "file"])
         for folder in os.listdir(audio_dir):
@@ -24,9 +24,11 @@ class ESCDataset(Dataset):
                 for file in os.listdir(audio_dir + "/" + folder):
                     annotations = pd.concat([annotations, pd.DataFrame({"folder": [folder], "file": [file]})], ignore_index=True)
         self.annotations = annotations
-        self.transform = transform
+        self.device = device
+        self.transform = transform.to(self.device)
         self.target_sample_rate = target_sample_rate
-        print(self.annotations)
+        self.num_samples = num_samples
+        #print(self.annotations)
 
     def __len__(self):
         return len(self.annotations)
@@ -37,18 +39,16 @@ class ESCDataset(Dataset):
         # Load audio from disk
         signal, sr = torchaudio.load(audio_sample_path)
         # Apply transforms
-        resampled_signal = self._resample(signal, sr)
-        mono_signal = self._mix_to_mono(resampled_signal)
-        mel_spec = self.transform(mono_signal)
+        signal = self._resample(signal, sr)
+        signal = self._mix_to_mono(signal)
+        signal = self._resize_signal_tensor(signal)
+        signal = signal.to(self.device)
+        mel_spec = self.transform(signal)
 
         # Scale logarithmically
         mel_spec = torchaudio.transforms.AmplitudeToDB()(mel_spec)
 
-        img = self._mel_to_numpy(mel_spec)
-
-        #return signal, resampled_signal, mono_signal, spec, img, label
-        #return signal, img, label
-        return img, label
+        return mel_spec, label
 
     def _resample(self, signal, sr):
         if sr != self.target_sample_rate:
@@ -63,17 +63,17 @@ class ESCDataset(Dataset):
             signal = torch.mean(signal, dim=0, keepdim=True)
         return signal
 
-    def _mel_to_numpy(self, mel):
-        # Convert to numpy array
-        spec = mel.squeeze().numpy()
-        spec = (spec - spec.min()) / (spec.max() - spec.min()) * 255
-        spec = spec.astype('uint8')
-
-        # Convert Mel Spectrogram to an image
-        img = Image.fromarray(spec)
-        img = torchvision.transforms.RandomVerticalFlip(1)(img)
-        img = torchvision.transforms.Resize(((480, 640)))(img)
-        return img
+    def _resize_signal_tensor(self, signal):
+        len_signal = signal.shape[1]
+        # Trim signal if too long
+        if len_signal > self.num_samples:
+            signal = signal[:, :self.num_samples]
+        # Pad signal if too short
+        elif len_signal < self.num_samples:
+            len_pad = self.num_samples - len_signal
+            last_dim_padding = (0, len_pad)
+            signal = torch.nn.functional.pad(signal, last_dim_padding)
+        return signal
 
     def _get_audio_sample_path(self, index):
         folder = self.annotations.iloc[index, 0]
@@ -82,63 +82,49 @@ class ESCDataset(Dataset):
         return path
 
     def _get_audio_sample_label(self, index):
-        # TODO change label when testing sample pulls
+        #return torch.as_tensor(list(str(self.annotations.iloc[index, 0]).split(" - ")[1]))
+        #return self.annotations.iloc[index, 0]
         return str(self.annotations.iloc[index, 0]).split(" - ")[1]
-        #return str(self.annotations.iloc[index])
 
 
 if __name__ == "__main__":
-    SAMPLE_RATE = 16000
+    AUDIO_DIR = "D:/datasets/ESC-50"
+    SAMPLE_RATE = 22050
+    SECONDS = 1     # all clips should be 5 seconds in length
+    NUM_SAMPLES = SAMPLE_RATE * SECONDS
     DSIZE = 1024
+    N_MELS = 128
+
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+    print(f"Running on device {device}")
 
     # Setup mel_spectrogram to be used as a transform
     mel_spectrogram = MelSpectrogram(
         sample_rate=SAMPLE_RATE,
         n_fft=DSIZE,
-        hop_length=DSIZE // 2,
-        n_mels=64
+        hop_length=DSIZE // 4,
+        n_mels=N_MELS
     )
 
     print(f"Loading audio from {AUDIO_DIR}")
-    esc = ESCDataset(AUDIO_DIR, mel_spectrogram, SAMPLE_RATE)
+    esc = ESCDataset(AUDIO_DIR, mel_spectrogram, SAMPLE_RATE, NUM_SAMPLES, device)
     print(f"There are {len(esc)} samples in the dataset")
 
-    signal, img, label = esc[420]
+    '''mel_spec, label = esc[420]
     import matplotlib.pyplot as plt
-    #plt.plot(signal.squeeze())
-    #plt.show()
-
-    #plt.specgram(signal.squeeze())
-    #plt.title("Original signal")
-    #plt.show()
-
-    '''plt.specgram(resampled_signal.squeeze())
-    plt.title("Resampled signal")
+    plt.pcolormesh(mel_spec.squeeze())
+    plt.title("Mel Spectrogram")
     plt.show()
+    print(mel_spec.shape)'''
 
-    plt.specgram(mono_signal.squeeze())
-    plt.title("Mono signal")
-    plt.show()
+    '''imel_t = torchaudio.transforms.InverseMelScale(
+        sample_rate=SAMPLE_RATE,
+        n_stft=DSIZE,
+        n_mels=N_MELS
+    )
 
-    plt.specgram(spec)
-    plt.title("Normalized signal")
+    imel = imel_t(mel_spec)
+
+    plt.pcolormesh(imel.squeeze())
+    plt.title("Mel scale inversed")
     plt.show()'''
-
-    plt.imshow(img)
-    plt.title(label)
-    plt.show()
-
-    # Test pull sample from dataset
-    import sounddevice as sd
-    import soundfile as sf
-
-    #sample_no = 789
-    #signal, label = esc[sample_no]
-    #print(f"\nLoaded test sample {sample_no}:")
-    #print(label)
-    #import matplotlib.pyplot as plt
-    #plt.specgram(signal.squeeze())
-    #plt.show()
-    sf.write("testing/test.wav", signal.squeeze(), 44100)
-    #sd.play(signal, 44100)
-    #sd.wait()
