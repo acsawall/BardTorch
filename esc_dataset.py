@@ -54,10 +54,10 @@ class ESCDataset(Dataset):
 
         # Convert to mel spectrogram
         mel_transform = MelSpectrogram(
-            sample_rate=SAMPLE_RATE,
-            n_fft=DSIZE,
-            hop_length=DSIZE // 4,
-            n_mels=N_MELS
+            sample_rate=self.target_sample_rate,
+            n_fft=1024,
+            hop_length=1024 // 2,   # 4,
+            n_mels=128
         ).to(self.device)
         mel_spec = mel_transform(signal)
 
@@ -104,6 +104,9 @@ class ESCDataset(Dataset):
         img = Image.fromarray(spec.cpu().data.numpy())
         img = torchvision.transforms.RandomVerticalFlip(1)(img)
         img = torchvision.transforms.Resize((480, 640))(img)
+        #img = torchvision.transforms.Resize(80)(img)
+        img = torchvision.transforms.ToTensor()(img)
+        img = torchvision.transforms.Normalize([0.5], [0.5])(img)
         return img
 
     def _get_audio_sample_path(self, index):
