@@ -13,14 +13,15 @@ from networks import SongUNet
 
 
 if __name__ == "__main__":
-    model_path = "./output/train_mnist_2024-04-16_191913/checkpoints/ema_5000.pth"
+    model_path = "./output/train_mnist_2024-04-17_133200/checkpoints/ema_sample_9999.pth"
     labels = ['0 - zero', '1 - one', '2 - two', '3 - three', '4 - four', '5 - five', '6 - six', '7 - seven', '8 - eight', '9 - nine']
     #labels = ['4 - four', '5 - five', '6 - six', '7 - seven',
-    #          '8 - eight', '9 - nine']
+              #'8 - eight', '9 - nine']
+    #labels = ['0 - zero', '1 - one', '2 - two']
     img_size = 32
     channels = 1
     classes = 10
-    eval_batch_size = 20
+    eval_batch_size = 16
     sampling_steps = 32
     device = "cuda" if torch.cuda.is_available() else "cpu"
     device = torch.device(device)
@@ -37,7 +38,11 @@ if __name__ == "__main__":
         img_resolution=img_size,
         in_channels=channels,
         out_channels=channels,
-        augment_dim=classes
+        augment_dim=classes,
+        model_channels=16,
+        channel_mult=[1, 2, 3, 4],
+        num_blocks=1,
+        attn_resolutions=[0]
     )
 
     edm = EDiffusion(
@@ -50,7 +55,7 @@ if __name__ == "__main__":
         p.requires_grad = False
     edm.ema.eval()
     latents = torch.randn([eval_batch_size, channels, img_size, img_size]).to(device).float()
-    sample = edm_sampler(edm, latents, use_ema_model=True, class_labels=labels, num_steps=sampling_steps).detach().cpu()
+    sample = edm_sampler(edm, latents, use_ema=True, class_labels=labels, num_steps=sampling_steps).detach().cpu()
 
     sample_dir = f"output/samples"
     os.makedirs(sample_dir, exist_ok=True)

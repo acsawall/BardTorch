@@ -54,13 +54,13 @@ if __name__ == "__main__":
 
     # Parameters
     channels = 1        # Grayscale
-    batch_size = 16
+    batch_size = 128    # 16
     eval_batch_size = 32
     img_size = 32
-    learning_rate = 1e-3
+    learning_rate = 1e-4
     n_steps = 10000
     sampling_steps = 18
-    accumulation_steps = 16     # Accumulates truncation error
+    accumulation_steps = 1      # 16     # Option for gradient accumulation with very large datasets
     warmup = 500                # How fast we increase the learning rate for the optimizer
 
     # Setup output directory
@@ -88,7 +88,7 @@ if __name__ == "__main__":
 
     # TODO Optional filter dataset by class
     classes = ['0 - zero', '1 - one', '2 - two', '3 - three', '4 - four', '5 - five', '6 - six', '7 - seven', '8 - eight', '9 - nine']
-    classes_we_want = None #['0 - zero', '2 - two', '4 - four', '6 - six', '8 - eight']
+    classes_we_want = None  # ['0 - zero', '2 - two', '4 - four', '6 - six', '8 - eight']
 
     if classes_we_want is not None:
         labels = []
@@ -107,7 +107,11 @@ if __name__ == "__main__":
         img_resolution=img_size,
         in_channels=channels,
         out_channels=channels,
-        augment_dim=len(classes_we_want)
+        augment_dim=len(classes_we_want),
+        model_channels=16,
+        channel_mult=[1, 2, 3, 4],
+        num_blocks=1,
+        attn_resolutions=[0]
     )
 
     edm = EDiffusion(
@@ -126,6 +130,7 @@ if __name__ == "__main__":
     for step in range(n_steps):
         optimizer.zero_grad()
         batch_loss = torch.tensor(0.0, device=device)
+        # TODO Gradient accumulation may not be needed for the ESC dataset
         for _ in range(accumulation_steps):
             try:
                 img_batch, label_dict = next(data_iterator)
@@ -133,7 +138,7 @@ if __name__ == "__main__":
                 data_iterator = iter(dataloader)
                 img_batch, label_dict = next(data_iterator)
             img_batch = img_batch.to(device)
-            loss = edm.train_one_step(img_batch) / accumulation_steps
+            loss = edm.train_one_step(img_batch, labels=label_dict) / accumulation_steps
             loss.backward()
             batch_loss += loss
 
