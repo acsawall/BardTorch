@@ -10,8 +10,8 @@ import numpy as np
 # Copyright (c) 2022, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 def edm_sampler(
     net, latents, class_labels=None, randn_like=torch.randn_like,
-    num_steps=18, sigma_min=0.002, sigma_max=80, rho=7,
-    S_churn=0, S_min=0, S_max=float('inf'), S_noise=1,
+    num_steps=18, sigma_min=0.002, sigma_max=80, rho=7, use_ema=True,
+    S_churn=0, S_min=0, S_max=float('inf'), S_noise=1
 ):
     # Adjust noise levels based on what's supported by the network.
     sigma_min = max(sigma_min, net.sigma_min)
@@ -33,13 +33,13 @@ def edm_sampler(
         x_hat = x_cur + (t_hat ** 2 - t_cur ** 2).sqrt() * S_noise * randn_like(x_cur)
 
         # Euler step.
-        denoised = net(x_hat, t_hat, class_labels).to(torch.float64)
+        denoised = net(x_hat, t_hat, labels=class_labels, use_ema=use_ema).to(torch.float64)
         d_cur = (x_hat - denoised) / t_hat
         x_next = x_hat + (t_next - t_hat) * d_cur
 
         # Apply 2nd order correction.
         if i < num_steps - 1:
-            denoised = net(x_next, t_next, class_labels).to(torch.float64)
+            denoised = net(x_next, t_next, labels=class_labels, use_ema=use_ema).to(torch.float64)
             d_prime = (x_next - denoised) / t_next
             x_next = x_hat + (t_next - t_hat) * (0.5 * d_cur + 0.5 * d_prime)
 
@@ -51,13 +51,11 @@ class EDiffusion(nn.Module):
     def __init__(
             self,
             model=None,
-            #n_classes=0,
             device=torch.device("cpu")
     ):
         super().__init__()
         self.device = device
         self.model = model.to(self.device)
-        #self.n_classes = n_classes
 
         # parameters
         self.sigma_data = 0.5       # default 0.5
@@ -70,7 +68,7 @@ class EDiffusion(nn.Module):
         self.P_std = 1.2
         self.sigma_data = 0.5
 
-        # optional
+        # exponential moving avg
         self.ema = copy.deepcopy(self.model).eval().requires_grad_(False)
         self.ema_rampup_ratio = 0.05
         self.ema_halflife_k_img = 500
@@ -81,7 +79,7 @@ class EDiffusion(nn.Module):
         #x = x.to(torch.float32)
         #sigma.to(torch.float32).reshape(-1, 1, 1, 1)
         sigma[sigma == 0] = self.sigma_min      # set all zero points to sigma_min
-        label = kwargs["labels"] if "labels" in kwargs else None
+        labels = kwargs["labels"] if "labels" in kwargs else None
         #labels = None if self.n_classes == 0 else torch.zeros([1, self.n_classes],device=x.device) if labels is None \
             #else labels.to(torch.float32).reshape(-1, self.n_classes)
         c_skip = self.sigma_data ** 2 / (sigma ** 2 + self.sigma_data ** 2)
@@ -90,9 +88,9 @@ class EDiffusion(nn.Module):
         c_noise = sigma.log() / 4
 
         if use_ema:
-            model_out = self.ema(torch.einsum('b,bijk->bijk', c_in, x), c_noise, class_labels=label)
+            model_out = self.ema(torch.einsum('b,bijk->bijk', c_in, x), c_noise, class_labels=labels)
         else:
-            model_out = self.model(torch.einsum('b,bijk->bijk', c_in, x), c_noise, class_labels=label)
+            model_out = self.model(torch.einsum('b,bijk->bijk', c_in, x), c_noise, class_labels=labels)
 
         try:
             model_out = model_out.sample

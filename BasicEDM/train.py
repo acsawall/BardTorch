@@ -11,6 +11,7 @@ import numpy as np
 from tqdm import tqdm
 
 import os
+import random
 from datetime import datetime
 from torchsummary import summary
 
@@ -70,6 +71,8 @@ if __name__ == "__main__":
     os.makedirs(sample_dir, exist_ok=True)
     ckpt_dir = f"{outdir}/checkpoints"
     os.makedirs(ckpt_dir, exist_ok=True)
+    models_dir = f"output/complete_models"
+    os.makedirs(models_dir, exist_ok=True)
 
     # Set random seed
     # TODO make this set-able
@@ -77,6 +80,8 @@ if __name__ == "__main__":
     torch.manual_seed(seed)
     if device.type == "cuda":
         torch.cuda.manual_seed(seed)
+    random.seed(seed)
+    torch.manual_seed(seed)
 
     # Download MNIST Dataset
     training_data = download_mnist_training(img_size)
@@ -90,6 +95,8 @@ if __name__ == "__main__":
         for c in classes_we_want:
             labels.append(classes.index(c))
         training_data = [(image, label) for image, label in training_data if label in labels]
+    else:
+        classes_we_want = classes
 
     # DataLoader
     dataloader = DataLoader(training_data, batch_size=batch_size, shuffle=True, pin_memory=True)
@@ -100,7 +107,7 @@ if __name__ == "__main__":
         img_resolution=img_size,
         in_channels=channels,
         out_channels=channels,
-        augment_dim=len(classes)    # TODO change later to classes_we_want
+        augment_dim=len(classes_we_want)
     )
 
     edm = EDiffusion(
@@ -117,9 +124,6 @@ if __name__ == "__main__":
     print("### Starting Training ###")
     train_loss = 0
     for step in range(n_steps):
-        #progress_bar = tqdm(total=n_steps)
-        # for i, (images, labels) in enumerate(progress_bar):
-        #    images, labels = images.to(device), labels.to(device)
         optimizer.zero_grad()
         batch_loss = torch.tensor(0.0, device=device)
         for _ in range(accumulation_steps):
@@ -144,13 +148,10 @@ if __name__ == "__main__":
 
         edm.update_exp_moving_avg(step=step, batch_size=batch_size)
 
-        loss_log = {"loss": loss.detach().item()}
-        #progress_bar.update(1)
-        #progress_bar.set_postfix(**loss_log)
-
         # Print progress every 250 steps
         if step % 250 == 0 or step == n_steps - 1:
-            print(f"Step: {step:08d}; Current Learning Rate: {optimizer.param_groups[0]['lr']:0.6f}; Average Loss: {train_loss / (step + 1):0.10f}; Batch Loss: {batch_loss.detach().item():0.10f}")
+            time = datetime.now().strftime("%H:%M:%S")
+            print(f"{time} -> Step: {step:08d}; Current Learning Rate: {optimizer.param_groups[0]['lr']:0.6f}; Average Loss: {train_loss / (step + 1):0.10f}; Batch Loss: {batch_loss.detach().item():0.10f}")
 
         # Save sample image every 25% complete
         if (step % (n_steps // 4) == 0 or step == n_steps - 1) and step > 0:
@@ -160,9 +161,30 @@ if __name__ == "__main__":
             torchvision.utils.save_image(tensor=(sample / 2 + 0.5).clamp(0, 1), fp=f"{sample_dir}/image_step_{step}.png")
             edm.model.train()   # Back to training mode
 
+        # Save model checkpoints at 25%, 50%, 75%, and 100% trained
         if (step % (n_steps // 4) == 0 or step == n_steps - 1) and step > 0:
-            torch.save(edm.model.state_dict(), f=f"{ckpt_dir}/model_{step}.pth")
-            torch.save(edm.ema.state_dict(), f=f"{ckpt_dir}/ema_{step}.pth")
+            '''torch.save({
+                'step': step,
+                'model_state_dict': edm.model.state_dict(),
+                'optimizer_state_dict': optimizer.state_dict(),
+                'train_loss': train_loss
+            }, f=f"{ckpt_dir}/model_{step}.pth")'''
+            # Save a checkpoint with parameters stored
+            torch.save({
+                'step': step,
+                'model_state_dict': edm.ema.state_dict(),
+                'optimizer_state_dict': optimizer.state_dict(),
+                'train_loss': train_loss
+            }, f=f"{ckpt_dir}/ema_ckpt_{step}.pth")
+            # Save a model to load from
+            torch.save(edm.ema.state_dict(), f=f"{ckpt_dir}/ema_sample_{step}.pth")
+            # Test alternate save method to load/sample from
+            torch.save(dict(net=edm, optimizer_state=optimizer.state_dict()), f=f"{ckpt_dir}/ema_alternate_{step}.pth")
+
+        # Save fully trained models
+        #if step == n_steps - 1:
+            #torch.save(edm.model.state_dict(), f=f"{models_dir}/model_{step}_{run_id}.pth")
+            #torch.save(edm.ema.state_dict(), f=f"{models_dir}/ema_{step}_{run_id}.pth")
 
     print("done done")
 
