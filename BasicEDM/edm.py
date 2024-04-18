@@ -51,11 +51,13 @@ class EDiffusion(nn.Module):
     def __init__(
             self,
             model=None,
+            #num_labels=0,
             device=torch.device("cpu")
     ):
         super().__init__()
         self.device = device
         self.model = model.to(self.device)
+        #self.num_labels = num_labels
 
         # parameters
         self.sigma_data = 0.5       # default 0.5
@@ -75,18 +77,23 @@ class EDiffusion(nn.Module):
 
     # Proposed forward function for preconditioning
     # https://github.com/NVlabs/edm/blob/main/training/networks.py#L654
-    def get_denoiser(self, x, sigma, use_ema=False, **kwargs):
+    def get_denoiser(self, x, sigma, labels=None, use_ema=False, **kwargs):
         #x = x.to(torch.float32)
         #sigma.to(torch.float32).reshape(-1, 1, 1, 1)
         sigma[sigma == 0] = self.sigma_min      # set all zero points to sigma_min
-        labels = kwargs["labels"] if "labels" in kwargs else None
-        #labels = None if self.n_classes == 0 else torch.zeros([1, self.n_classes],device=x.device) if labels is None \
-            #else labels.to(torch.float32).reshape(-1, self.n_classes)
+        labels = labels if labels is not None else None
+        #labels = None if labels.size()[0] == 0 else torch.zeros([1, labels.size()[0]], device=x.device) if labels is None else labels.to(torch.float32).reshape(-1, labels.size()[0])
         c_skip = self.sigma_data ** 2 / (sigma ** 2 + self.sigma_data ** 2)
         c_out = sigma * self.sigma_data / (sigma ** 2 + self.sigma_data ** 2).sqrt()
         c_in = 1 / (self.sigma_data ** 2 + sigma ** 2).sqrt()
         c_noise = sigma.log() / 4
 
+        '''if use_ema:
+            F_x = self.ema(c_in * x, c_noise.flatten(), class_labels=labels)
+        else:
+            F_x = self.model(c_in * x, c_noise.flatten(), class_labels=labels)
+        D_x = c_skip * x + c_out * F_x
+        return D_x'''
         if use_ema:
             model_out = self.ema(torch.einsum('b,bijk->bijk', c_in, x), c_noise, class_labels=labels)
         else:
@@ -106,9 +113,11 @@ class EDiffusion(nn.Module):
 
         y, augment_labels = augment_pipe(images) if augment_pipe is not None else (images, None)
         noise = torch.randn_like(y)
+        #n = noise * sigma
         n = torch.einsum('b,bijk->bijk', sigma, noise)
         D_yn = self.get_denoiser(y + n, sigma, labels=labels, augment_labels=augment_labels)
         loss = torch.einsum('b,bijk->bijk', weight, ((D_yn - y) ** 2))
+        #loss = weight * ((D_yn - y) ** 2)
         return loss.mean()
 
     def __call__(self, x, sigma, labels=None, augment_labels=None, use_ema=True):

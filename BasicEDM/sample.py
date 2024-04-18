@@ -13,12 +13,12 @@ from networks import SongUNet
 
 
 if __name__ == "__main__":
-    model_path = "./output/train_mnist_2024-04-17_133200/checkpoints/ema_sample_9999.pth"
+    model_path = "./output/train_mnist_2024-04-17_184129/checkpoints/ema_sample_19999.pth"
     labels = ['0 - zero', '1 - one', '2 - two', '3 - three', '4 - four', '5 - five', '6 - six', '7 - seven', '8 - eight', '9 - nine']
     #labels = ['4 - four', '5 - five', '6 - six', '7 - seven',
-              #'8 - eight', '9 - nine']
+    #          '8 - eight', '9 - nine']
     #labels = ['0 - zero', '1 - one', '2 - two']
-    img_size = 32
+    img_size = 16
     channels = 1
     classes = 10
     eval_batch_size = 16
@@ -27,7 +27,7 @@ if __name__ == "__main__":
     device = torch.device(device)
 
     # Set random seed
-    seed = 69
+    seed = random.randint(1, 9999)  # 69
     torch.manual_seed(seed)
     if device.type == "cuda":
         torch.cuda.manual_seed(seed)
@@ -38,7 +38,8 @@ if __name__ == "__main__":
         img_resolution=img_size,
         in_channels=channels,
         out_channels=channels,
-        augment_dim=classes,
+        label_dim=classes,
+        augment_dim=9,
         model_channels=16,
         channel_mult=[1, 2, 3, 4],
         num_blocks=1,

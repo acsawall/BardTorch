@@ -20,7 +20,7 @@ class ESCDataset(Dataset):
     :param device:
     :param ret_type: str, one of ["waveform", "mel", "image"] for either a waveform, mel spectrogram, or PIL image
     """
-    def __init__(self, audio_dir, target_sample_rate, num_samples, device, ret_type: str = "waveform"):
+    def __init__(self, audio_dir, target_sample_rate, num_samples, image_resolution, device, ret_type: str = "waveform"):
         assert ret_type in ["waveform", "mel", "image"], \
             "Parameter \"ret_type\" must be one of [\"waveform\", \"mel\", \"image\"]"
         self.audio_dir = audio_dir
@@ -33,6 +33,7 @@ class ESCDataset(Dataset):
         self.device = device
         self.target_sample_rate = target_sample_rate
         self.num_samples = num_samples
+        self.image_resolution = image_resolution
         self.ret_type = ret_type
 
     def __len__(self):
@@ -103,11 +104,12 @@ class ESCDataset(Dataset):
         # TODO can this be done without numpy on cuda?
         img = Image.fromarray(spec.cpu().data.numpy())
         img = torchvision.transforms.RandomVerticalFlip(1)(img)
-        img = torchvision.transforms.Resize((480, 640))(img)
-        #img = torchvision.transforms.Resize(80)(img)
-        img = torchvision.transforms.ToTensor()(img)
-        img = torchvision.transforms.Normalize([0.5], [0.5])(img)
-        return img
+        img = torchvision.transforms.Resize((self.image_resolution, self.image_resolution))(img)
+        #print(img.size)
+        #img.show()
+        img_tensor = torchvision.transforms.ToTensor()(img)
+        img_tensor = torchvision.transforms.Normalize((0.5,), (0.5,))(img_tensor)
+        return img_tensor
 
     def _get_audio_sample_path(self, index):
         folder = self.annotations.iloc[index, 0]
@@ -122,19 +124,20 @@ class ESCDataset(Dataset):
 if __name__ == "__main__":
     AUDIO_DIR = "D:/datasets/ESC-50"
     SAMPLE_RATE = 22050
-    SECONDS = 1     # all clips should be 5 seconds in length
+    SECONDS = 5     # all clips should be 5 seconds in length
     NUM_SAMPLES = SAMPLE_RATE * SECONDS
-    DSIZE = 1024
-    N_MELS = 128
+    IMAGE_RESOLUTION = 256
+    #DSIZE = 1024
+    #N_MELS = 128
 
     device = "cuda" if torch.cuda.is_available() else "cpu"
     print(f"Running on device {device}")
     print(f"Loading audio from {AUDIO_DIR}")
-    esc = ESCDataset(AUDIO_DIR, SAMPLE_RATE, NUM_SAMPLES, device, ret_type="waveform")
+    esc = ESCDataset(audio_dir=AUDIO_DIR, target_sample_rate=SAMPLE_RATE, num_samples=NUM_SAMPLES, image_resolution=IMAGE_RESOLUTION, device=device, ret_type="image")
     print(f"There are {len(esc)} samples in the dataset")
+    print(esc[420][0].size())
 
-    #import matplotlib.pyplot as plt
+    import matplotlib.pyplot as plt
     #plt.pcolormesh(esc[420][0].cpu().data.squeeze())
     #plt.plot(esc[420][0].cpu().data.squeeze())
     #plt.show()
-    #esc[420][0].show()
