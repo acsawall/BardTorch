@@ -50,7 +50,7 @@ if __name__ == "__main__":
     eval_batch_size = 16
     img_size = 32  # 32
     learning_rate = 1e-4
-    n_steps = 20000
+    n_steps = 10000
     sampling_steps = 18
     accumulation_steps = 1      # 16     # Option for gradient accumulation with very large datasets
     warmup = 500                # How fast we increase the learning rate for the optimizer
@@ -83,6 +83,7 @@ if __name__ == "__main__":
     classes = ['0 - zero', '1 - one', '2 - two', '3 - three', '4 - four', '5 - five', '6 - six', '7 - seven', '8 - eight', '9 - nine']
     #classes = list(training_data.annotations.folder.unique())
     classes_we_want = None  # ['0 - zero', '2 - two', '4 - four', '6 - six', '8 - eight']
+    label_tensor = torch.tensor([0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 1, 2, 3, 4, 5, 6]).to(device)
 
     if classes_we_want is not None:
         labels = []
@@ -113,10 +114,10 @@ if __name__ == "__main__":
         img_resolution=img_size,
         in_channels=channels,
         out_channels=channels,
-        label_dim=0,
+        label_dim=len(classes_we_want),
         augment_dim=9,
-        model_channels=16,              # related to map_label
-        channel_mult=[1, 2, 3, 4],
+        model_channels=16,
+        channel_mult=[1, 2, 2, 2],
         num_blocks=1,
         attn_resolutions=[0]
     )
@@ -174,7 +175,7 @@ if __name__ == "__main__":
         if (step % (n_steps // 4) == 0 or step == n_steps - 1) and step > 0:
             edm.model.eval()    # Switch to eval mode to take a sample
             latents = torch.randn([eval_batch_size, channels, img_size, img_size]).to(device)
-            sample = edm_sampler(edm, latents, num_steps=sampling_steps).detach().cpu()
+            sample = edm_sampler(edm, latents, class_labels=label_tensor, num_steps=sampling_steps).detach().cpu()
             torchvision.utils.save_image(tensor=(sample / 2 + 0.5).clamp(0, 1), fp=f"{sample_dir}/image_step_{step}.png")
             edm.model.train()   # Back to training mode
 

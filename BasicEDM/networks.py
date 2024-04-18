@@ -422,6 +422,8 @@ class DhariwalUNet(torch.nn.Module):
         block_kwargs = dict(emb_channels=emb_channels, channels_per_head=64, dropout=dropout, init=init,
                             init_zero=init_zero)
 
+        self.label_emb = nn.Embedding(label_dim, model_channels * 4) if label_dim > 0 else None
+
         # Mapping.
         self.map_noise = PositionalEmbedding(num_channels=model_channels)
         self.map_augment = Linear(in_features=augment_dim, out_features=model_channels, bias=False,
@@ -476,10 +478,12 @@ class DhariwalUNet(torch.nn.Module):
         emb = silu(self.map_layer0(emb))
         emb = self.map_layer1(emb)
         if self.map_label is not None:
-            tmp = class_labels
-            if self.training and self.label_dropout:
-                tmp = tmp * (torch.rand([x.shape[0], 1], device=x.device) >= self.label_dropout).to(tmp.dtype)
-            emb = emb + self.map_label(tmp)
+            if self.label_emb is not None:
+                tmp = class_labels
+                if self.training and self.label_dropout:
+                    tmp = tmp * (torch.rand([x.shape[0], 1], device=x.device) >= self.label_dropout).to(tmp.dtype)
+                emb = emb + self.label_emb(tmp)
+            #emb = emb + self.map_label(tmp)
         emb = silu(emb)
 
         # Encoder.

@@ -9,22 +9,23 @@ from torchvision.transforms import ToTensor
 from torch.utils.data import Dataset, DataLoader
 import numpy as np
 from tqdm import tqdm
-from networks import SongUNet
+from networks import SongUNet, DhariwalUNet
 
 
 if __name__ == "__main__":
-    model_path = "./output/train_mnist_2024-04-17_184129/checkpoints/ema_sample_19999.pth"
-    labels = ['0 - zero', '1 - one', '2 - two', '3 - three', '4 - four', '5 - five', '6 - six', '7 - seven', '8 - eight', '9 - nine']
+    model_path = "./output/train_mnist_2024-04-17_222744/checkpoints/ema_sample_9999.pth"
+    #labels = ['0 - zero', '1 - one', '2 - two', '3 - three', '4 - four', '5 - five', '6 - six', '7 - seven', '8 - eight', '9 - nine']
     #labels = ['4 - four', '5 - five', '6 - six', '7 - seven',
     #          '8 - eight', '9 - nine']
     #labels = ['0 - zero', '1 - one', '2 - two']
-    img_size = 16
+    img_size = 32
     channels = 1
     classes = 10
     eval_batch_size = 16
     sampling_steps = 32
     device = "cuda" if torch.cuda.is_available() else "cpu"
     device = torch.device(device)
+    labels = torch.tensor([6, 9, 6, 9, 4, 2, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9]).to(device)
 
     # Set random seed
     seed = random.randint(1, 9999)  # 69
@@ -34,7 +35,7 @@ if __name__ == "__main__":
     random.seed(seed)
     torch.manual_seed(seed)
 
-    unet = SongUNet(
+    '''unet = SongUNet(
         img_resolution=img_size,
         in_channels=channels,
         out_channels=channels,
@@ -42,6 +43,17 @@ if __name__ == "__main__":
         augment_dim=9,
         model_channels=16,
         channel_mult=[1, 2, 3, 4],
+        num_blocks=1,
+        attn_resolutions=[0]
+    )'''
+    unet = DhariwalUNet(
+        img_resolution=img_size,
+        in_channels=channels,
+        out_channels=channels,
+        label_dim=10,
+        augment_dim=9,
+        model_channels=16,
+        channel_mult=[1, 2, 2, 2],
         num_blocks=1,
         attn_resolutions=[0]
     )
