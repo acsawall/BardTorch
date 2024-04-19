@@ -13,7 +13,7 @@ from networks import SongUNet, DhariwalUNet
 
 
 if __name__ == "__main__":
-    model_path = "./output/train_mnist_2024-04-17_222744/checkpoints/ema_sample_9999.pth"
+    model_path = "./output/train_mnist_2024-04-19_151154/checkpoints/ema_sample_1999.pth"
     #labels = ['0 - zero', '1 - one', '2 - two', '3 - three', '4 - four', '5 - five', '6 - six', '7 - seven', '8 - eight', '9 - nine']
     #labels = ['4 - four', '5 - five', '6 - six', '7 - seven',
     #          '8 - eight', '9 - nine']

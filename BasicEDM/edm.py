@@ -51,21 +51,17 @@ class EDiffusion(nn.Module):
     def __init__(
             self,
             model=None,
-            #num_labels=0,
             device=torch.device("cpu")
     ):
         super().__init__()
         self.device = device
         self.model = model.to(self.device)
-        #self.num_labels = num_labels
 
-        # parameters
+        # Parameter values from Table 1 https://arxiv.org/pdf/2206.00364.pdf
         self.sigma_data = 0.5       # default 0.5
         self.sigma_max = 80         # default 80
         self.sigma_min = 0.002      # default 0.002
         self.rho = 7                # default 7
-
-        # constants
         self.P_mean = -1.2
         self.P_std = 1.2
         self.sigma_data = 0.5

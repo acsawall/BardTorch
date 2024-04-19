@@ -46,7 +46,7 @@ if __name__ == "__main__":
 
     # Parameters
     channels = 1        # Grayscale
-    batch_size = 64 #16
+    batch_size = 128 #16
     eval_batch_size = 16
     img_size = 32  # 32
     learning_rate = 1e-4
@@ -54,6 +54,8 @@ if __name__ == "__main__":
     sampling_steps = 18
     accumulation_steps = 1      # 16     # Option for gradient accumulation with very large datasets
     warmup = 500                # How fast we increase the learning rate for the optimizer
+    resume_training = False
+    resume_ckpt = "./output/train_mnist_2024-04-19_163852/checkpoints/ema_ckpt_4999.pth"
 
     # Setup output directory
     run_id = datetime.now().strftime("%Y-%m-%d_%H%M%S")
@@ -79,10 +81,13 @@ if __name__ == "__main__":
     training_data = download_mnist_training(img_size)
     #training_data = ESCDataset(audio_dir=audio_dir, target_sample_rate=target_sample_rate, num_samples=target_sample_rate * seconds, image_resolution=img_size, device=device, ret_type=ret_type)
 
-    # TODO Optional filter dataset by class
+    # TODO Optional filter training dataset by class
+    # Note: unnecessary for cond training. Only need the number of classes to pass to the unet label_dim
     classes = ['0 - zero', '1 - one', '2 - two', '3 - three', '4 - four', '5 - five', '6 - six', '7 - seven', '8 - eight', '9 - nine']
+
     #classes = list(training_data.annotations.folder.unique())
     classes_we_want = None  # ['0 - zero', '2 - two', '4 - four', '6 - six', '8 - eight']
+    # Labels to use for mid-training sampling
     label_tensor = torch.tensor([0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 1, 2, 3, 4, 5, 6]).to(device)
 
     if classes_we_want is not None:
@@ -121,22 +126,25 @@ if __name__ == "__main__":
         num_blocks=1,
         attn_resolutions=[0]
     )
-
     edm = EDiffusion(
         model=unet,
-        #num_labels=len(classes_we_want),
         device=device
     )
 
-    # Start Training Mode
-    edm.model.train()
-
     optimizer = Adam(edm.model.parameters(), lr=learning_rate)
+    train_loss = 0
+    start_step = 0
+    if resume_training:
+        checkpoint = torch.load(resume_ckpt, map_location=device)
+        edm.ema.load_state_dict(checkpoint["model_state_dict"])
+        optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
+        train_loss = checkpoint["train_loss"]
+        start_step = checkpoint["step"]
 
+    edm.model.train()
     # Training Loop
     print("### Starting Training ###")
-    train_loss = 0
-    for step in range(n_steps):
+    for step in range(start_step, n_steps):
         optimizer.zero_grad()
         batch_loss = torch.tensor(0.0, device=device)
         # TODO Gradient accumulation may not be needed for the ESC dataset

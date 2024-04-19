@@ -282,6 +282,8 @@ class SongUNet(torch.nn.Module):
             init=init, init_zero=init_zero, init_attn=init_attn,
         )
 
+        self.label_emb = nn.Embedding(label_dim, model_channels * 4) if label_dim > 0 else None
+
         # Mapping.
         self.map_noise = PositionalEmbedding(num_channels=noise_channels,
                                              endpoint=True) if embedding_type == 'positional' else FourierEmbedding(
@@ -351,10 +353,16 @@ class SongUNet(torch.nn.Module):
         emb = self.map_noise(noise_labels)
         emb = emb.reshape(emb.shape[0], 2, -1).flip(1).reshape(*emb.shape)  # swap sin/cos
         if self.map_label is not None:
+            if self.label_emb is not None:
+                tmp = class_labels
+                if self.training and self.label_dropout:
+                    tmp = tmp * (torch.rand([x.shape[0], 1], device=x.device) >= self.label_dropout).to(tmp.dtype)
+                emb = emb + self.label_emb(tmp)
+        '''if self.map_label is not None:
             tmp = class_labels
             if self.training and self.label_dropout:
                 tmp = tmp * (torch.rand([x.shape[0], 1], device=x.device) >= self.label_dropout).to(tmp.dtype)
-            emb = emb + self.map_label(tmp * np.sqrt(self.map_label.in_features))
+            emb = emb + self.map_label(tmp * np.sqrt(self.map_label.in_features))'''
         if self.map_augment is not None and augment_labels is not None:
             emb = emb + self.map_augment(augment_labels)
         emb = silu(self.map_layer0(emb))
