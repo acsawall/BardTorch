@@ -1,5 +1,6 @@
 import librosa
 import librosa.feature
+import skimage.io
 import torch
 from torch.utils.data import Dataset
 import torchaudio
@@ -24,27 +25,29 @@ class RainSpecDataset(Dataset):
     ):
         self.image_dir = image_dir
         self.transform = transform
-        self.files = []
+        self.data = []
         for file in tqdm(os.listdir(image_dir)):
-            self.files.append(file)
+            img_path = os.path.join(self.image_dir, file)
+            image = Image.open(img_path)
+            self.data.append(image)
 
     def __len__(self):
-        return len(self.files)
+        return len(self.data)
 
     def __getitem__(self, index):
-        img_path = os.path.join(self.image_dir, self.files[index])
-        image = io.imread(img_path)
+        image = self.data[index]
         if self.transform:
             image = self.transform(image)
-
-        return image
+        #img_tensor = torchvision.transforms.ToTensor()(image)
+        #img_tensor *= 50        # TODO should this be done for training or sampling?
+        return image, 0
 
 
 if __name__ == "__main__":
     dir = "D:/datasets/rain_spec"
-    rsd = RainSpecDataset(dir)
+    rsd = RainSpecDataset(dir, torchvision.transforms.Resize((256, 256)))
 
-    m = rsd[0]
+    m = rsd[0][0]
     img = np.array(m)
     img *= 50
     aud = librosa.feature.inverse.mel_to_audio(img, sr=22050, n_fft=2048, hop_length=512)

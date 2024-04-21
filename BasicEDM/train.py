@@ -1,6 +1,9 @@
 from edm import edm_sampler, EDiffusion
 from networks import SongUNet, DhariwalUNet
 from esc_dataset import ESCDataset
+from fsc_dataset import FSCDataset
+from rain_dataset import RainDataset
+from rainspec_dataset import RainSpecDataset
 
 import torch
 import torchvision
@@ -8,9 +11,6 @@ from torchvision import datasets
 from torchvision.transforms.v2 import PILToTensor, ToTensor, Resize, Normalize, Compose, ToImage, ToDtype
 from torch.utils.data import Dataset, DataLoader
 from torch.optim import Adam
-import numpy as np
-import pandas as pd
-from tqdm import tqdm
 
 import os
 import random
@@ -39,27 +39,32 @@ if __name__ == "__main__":
     device = torch.device(device)
 
     # Dataset Params
-    audio_dir = "D:/datasets/ESC-50"
+    #audio_dir = "D:/datasets/ESC-50"
+    #audio_dir = "D:/datasets/rain"
+    #audio_dir = "D:/datasets/ESC-mini"
+    #audio_dir = "D:/datasets/FSC22/Audio Wise V1.0"
+    #metadata_path = "D:/datasets/FSC22/Metadata V1.0 FSC22.csv"
+    img_dir = "D:/datasets/rain_spec"
     target_sample_rate = 22050
-    seconds = 1
+    seconds = 5
     ret_type = "image"
 
     # Parameters
     channels = 1        # Grayscale
-    batch_size = 128 #16
+    batch_size = 8  # 16
     eval_batch_size = 16
-    img_size = 32  # 32
-    learning_rate = 1e-4
-    n_steps = 10000
+    img_size = 256  # 32
+    learning_rate = 1e-4  # 1e-4
+    n_steps = 5000
     sampling_steps = 18
     accumulation_steps = 1      # 16     # Option for gradient accumulation with very large datasets
-    warmup = 500                # How fast we increase the learning rate for the optimizer
+    warmup = 1000                   # How fast we increase the learning rate for the optimizer
     resume_training = False
     resume_ckpt = "./output/train_mnist_2024-04-19_163852/checkpoints/ema_ckpt_4999.pth"
 
     # Setup output directory
     run_id = datetime.now().strftime("%Y-%m-%d_%H%M%S")
-    outdir = f"output/train_mnist_{run_id}"
+    outdir = f"output/train_{run_id}"
     os.makedirs(outdir, exist_ok=True)
     sample_dir = f"{outdir}/samples"
     os.makedirs(sample_dir, exist_ok=True)
@@ -77,26 +82,24 @@ if __name__ == "__main__":
     random.seed(seed)
     torch.manual_seed(seed)
 
-    # Download MNIST Dataset
-    training_data = download_mnist_training(img_size)
+    #training_data = download_mnist_training(img_size)
+    #mnist = download_mnist_training(img_size)
     #training_data = ESCDataset(audio_dir=audio_dir, target_sample_rate=target_sample_rate, num_samples=target_sample_rate * seconds, image_resolution=img_size, device=device, ret_type=ret_type)
+    #training_data = RainDataset(audio_dir, target_sample_rate, target_sample_rate * seconds, img_size, device)
+    training_data = RainSpecDataset(img_dir,
+                                    torchvision.transforms.Compose(
+                                        [
+                                            Resize(img_size),
+                                            Compose([ToImage(), ToDtype(torch.float32, scale=True)]),
+                                            Normalize((0.5,), (0.5,))
+                                        ]
+                                    ))
+    #training_data = FSCDataset(audio_dir=audio_dir, metadata_path=metadata_path, target_sample_rate=target_sample_rate, num_samples=target_sample_rate*seconds, image_resolution=img_size, device=device)
 
-    # TODO Optional filter training dataset by class
-    # Note: unnecessary for cond training. Only need the number of classes to pass to the unet label_dim
-    classes = ['0 - zero', '1 - one', '2 - two', '3 - three', '4 - four', '5 - five', '6 - six', '7 - seven', '8 - eight', '9 - nine']
-
-    #classes = list(training_data.annotations.folder.unique())
-    classes_we_want = None  # ['0 - zero', '2 - two', '4 - four', '6 - six', '8 - eight']
+    #n_classes = len(training_data.classes)
     # Labels to use for mid-training sampling
-    label_tensor = torch.tensor([0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 1, 2, 3, 4, 5, 6]).to(device)
-
-    if classes_we_want is not None:
-        labels = []
-        for c in classes_we_want:
-            labels.append(classes.index(c))
-        training_data = [(image, label) for image, label in training_data if label in labels]
-    else:
-        classes_we_want = classes
+    #label_tensor = torch.tensor([0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 1, 2, 3, 4, 5, 6]).to(device)
+    label_tensor = None #torch.tensor([1, 1, 1, 1, 1, 2, 2, 4, 4, 10, 10, 10, 11, 11, 14, 14]).to(device)
 
     # DataLoader
     dataloader = DataLoader(training_data, batch_size=batch_size, shuffle=True, pin_memory=True)
@@ -107,22 +110,22 @@ if __name__ == "__main__":
         img_resolution=img_size,
         in_channels=channels,
         out_channels=channels,
-        label_dim=len(classes_we_want),
+        label_dim=len(classes),
         augment_dim=9,
         model_channels=64,  #16,
-        channel_mult=[1, 2, 2, 2],  #[1, 2, 3, 4],
+        channel_mult=[1, 2, 3, 4],  #[1, 2, 3, 4],
         resample_filter=[1, 1],
-        num_blocks=1,
+        num_blocks=4,
         attn_resolutions=[0]
     )'''
     unet = DhariwalUNet(
         img_resolution=img_size,
         in_channels=channels,
         out_channels=channels,
-        label_dim=len(classes_we_want),
+        label_dim=0, # n_classes,
         augment_dim=9,
-        model_channels=16,
-        channel_mult=[1, 2, 2, 2],
+        model_channels=64,
+        channel_mult=[1, 2, 3, 4],
         num_blocks=1,
         attn_resolutions=[0]
     )
@@ -189,12 +192,6 @@ if __name__ == "__main__":
 
         # Save model checkpoints at 25%, 50%, 75%, and 100% trained
         if (step % (n_steps // 4) == 0 or step == n_steps - 1) and step > 0:
-            '''torch.save({
-                'step': step,
-                'model_state_dict': edm.model.state_dict(),
-                'optimizer_state_dict': optimizer.state_dict(),
-                'train_loss': train_loss
-            }, f=f"{ckpt_dir}/model_{step}.pth")'''
             # Save a checkpoint with parameters stored
             torch.save({
                 'step': step,
@@ -205,12 +202,12 @@ if __name__ == "__main__":
             # Save a model to load from
             torch.save(edm.ema.state_dict(), f=f"{ckpt_dir}/ema_sample_{step}.pth")
             # Test alternate save method to load/sample from
-            torch.save(dict(net=edm, optimizer_state=optimizer.state_dict()), f=f"{ckpt_dir}/ema_alternate_{step}.pth")
+            #torch.save(dict(net=edm, optimizer_state=optimizer.state_dict()), f=f"{ckpt_dir}/ema_alternate_{step}.pth")
 
         # Save fully trained models
-        #if step == n_steps - 1:
+        if step == n_steps - 1:
             #torch.save(edm.model.state_dict(), f=f"{models_dir}/model_{step}_{run_id}.pth")
-            #torch.save(edm.ema.state_dict(), f=f"{models_dir}/ema_{step}_{run_id}.pth")
+            torch.save(edm.ema.state_dict(), f=f"{models_dir}/ema_{step}_{run_id}.pth")
 
     print("done done")
 
