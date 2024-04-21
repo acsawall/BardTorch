@@ -17,6 +17,7 @@ import os
 import random
 from datetime import datetime
 from torchsummary import summary
+from PIL import Image
 
 
 def download_mnist_training(img_size):
@@ -53,7 +54,7 @@ if __name__ == "__main__":
     # Parameters
     channels = 1        # Grayscale
     batch_size = 16  # 16
-    eval_batch_size = 16
+    eval_batch_size = 8
     img_size = 256  # 32
     learning_rate = 1e-4  # 1e-4
     n_steps = 10000
@@ -91,7 +92,6 @@ if __name__ == "__main__":
                                     torchvision.transforms.Compose(
                                         [
                                             Resize(img_size),
-                                            Compose([ToImage(), ToDtype(torch.float32, scale=True)]),
                                             #Normalize((0.5,), (0.5,))
                                         ]
                                     ))
@@ -100,25 +100,13 @@ if __name__ == "__main__":
     #n_classes = len(training_data.classes)
     # Labels to use for mid-training sampling
     #label_tensor = torch.tensor([0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 1, 2, 3, 4, 5, 6]).to(device)
-    label_tensor = None #torch.tensor([1, 1, 1, 1, 1, 2, 2, 4, 4, 10, 10, 10, 11, 11, 14, 14]).to(device)
+    label_tensor = None  #torch.tensor([1, 1, 1, 1, 1, 2, 2, 4, 4, 10, 10, 10, 11, 11, 14, 14]).to(device)
 
     # DataLoader
     dataloader = DataLoader(training_data, batch_size=batch_size, shuffle=True, pin_memory=True)
     print(f"DataLoader contains {len(dataloader)} images")
 
     # Initialize UNet and EDM Model
-    '''unet = SongUNet(
-        img_resolution=img_size,
-        in_channels=channels,
-        out_channels=channels,
-        label_dim=len(classes),
-        augment_dim=9,
-        model_channels=64,  #16,
-        channel_mult=[1, 2, 3, 4],  #[1, 2, 3, 4],
-        resample_filter=[1, 1],
-        num_blocks=4,
-        attn_resolutions=[0]
-    )'''
     unet = DhariwalUNet(
         img_resolution=img_size,
         in_channels=channels,
@@ -126,7 +114,7 @@ if __name__ == "__main__":
         label_dim=0,  # n_classes,
         augment_dim=9,
         model_channels=16,
-        channel_mult=[1, 2, 2, 2],      # [1, 2, 3, 4]
+        channel_mult=[1, 2, 3, 4],      # [1, 2, 3, 4]
         num_blocks=1,
         attn_resolutions=[0]
     )
@@ -158,6 +146,8 @@ if __name__ == "__main__":
             except Exception:
                 data_iterator = iter(dataloader)
                 img_batch, label_dict = next(data_iterator)
+            #plt.imshow(img_batch[0].squeeze())
+            #plt.show()
             img_batch = img_batch.to(device)
             label_dict = label_dict.to(device)
             loss = edm.train_one_step(img_batch, labels=label_dict) / accumulation_steps
@@ -182,8 +172,8 @@ if __name__ == "__main__":
             print(f"{time} -> Step: {step:08d}; Current Learning Rate: {optimizer.param_groups[0]['lr']:0.6f}; Average Loss: {train_loss / (step + 1):0.10f}; Batch Loss: {batch_loss.detach().item():0.10f}")
 
         # Save model checkpoints at 25%, 50%, 75%, and 100% trained
-        # Save model every 250 steps
-        if (step % 250 == 0 or step == n_steps - 1) and step > 0:  # (step % (n_steps // 4) == 0 or step == n_steps - 1) and step > 0:
+        # Save model every 500 steps
+        if (step % 500 == 0 or step == n_steps - 1) and step > 0:  # (step % (n_steps // 4) == 0 or step == n_steps - 1) and step > 0:
             # Save a checkpoint with parameters stored
             torch.save({
                 'step': step,
@@ -197,13 +187,22 @@ if __name__ == "__main__":
             #torch.save(dict(net=edm, optimizer_state=optimizer.state_dict()), f=f"{ckpt_dir}/ema_alternate_{step}.pth")
 
         # Save sample image every 25% complete
-        # Save sample image every 250 steps
-        if (step % 250 == 0 or step == n_steps - 1) and step > 0:  # (step % (n_steps // 4) == 0 or step == n_steps - 1) and step > 0:
+        # Save sample image every 500 steps
+        if (step % 500 == 0 or step == n_steps - 1) and step > 0:  # (step % (n_steps // 4) == 0 or step == n_steps - 1) and step > 0:
             edm.model.eval()  # Switch to eval mode to take a sample
-            latents = torch.randn([eval_batch_size, channels, img_size, img_size]).to(device)
-            sample = edm_sampler(edm, latents, class_labels=label_tensor, num_steps=sampling_steps).detach().cpu()
-            torchvision.utils.save_image(tensor=(sample / 2 + 0.5).clamp(0, 1),
-                                         fp=f"{sample_dir}/image_step_{step}.png")
+            latents = torch.randn([eval_batch_size, channels, img_size, img_size], device=device)#.to(device)
+            #sample = edm_sampler(edm, latents, class_labels=label_tensor, num_steps=sampling_steps).detach().cpu()
+            #torchvision.utils.save_image(tensor=(sample / 2 + 0.5).clamp(0, 1),
+            #                             fp=f"{sample_dir}/image_step_{step}.png")
+            sample = edm_sampler(edm, latents, class_labels=label_tensor, num_steps=sampling_steps)
+            # is the * 50 necessary? 2455 max luminance value
+            images_np = sample.to(torch.float32).cpu().numpy()  # .permute(0, 2, 3, 1).cpu().numpy()
+            idx = 0
+            for img in images_np:
+                im = Image.fromarray(img.squeeze()).convert("F")
+                im.save(f"{sample_dir}/image_step_{step}_{idx}.tiff")
+                idx += 1
+
             edm.model.train()  # Back to training mode
 
         # Save fully trained models

@@ -41,12 +41,11 @@ class RainSpecDataset(Dataset):
 
     def __getitem__(self, index):
         image = self.data[index]
-        #image *= 50
         if self.transform:
             image = self.transform(image)
 
-        plt.pcolormesh(image.squeeze())
-        plt.show()
+        #plt.pcolormesh(image.squeeze())
+        #plt.show()
         return image, 0
 
 
