@@ -13,19 +13,19 @@ from networks import SongUNet, DhariwalUNet
 
 
 if __name__ == "__main__":
-    model_path = "./output/train_mnist_2024-04-19_151154/checkpoints/ema_sample_1999.pth"
+    model_path = "./output/train_mnist_2024-04-19_204920/checkpoints/ema_sample_250.pth"
     #labels = ['0 - zero', '1 - one', '2 - two', '3 - three', '4 - four', '5 - five', '6 - six', '7 - seven', '8 - eight', '9 - nine']
     #labels = ['4 - four', '5 - five', '6 - six', '7 - seven',
     #          '8 - eight', '9 - nine']
     #labels = ['0 - zero', '1 - one', '2 - two']
-    img_size = 32
+    img_size = 256
     channels = 1
-    classes = 10
-    eval_batch_size = 16
-    sampling_steps = 32
+    classes = 0
+    eval_batch_size = 8
+    sampling_steps = 16
     device = "cuda" if torch.cuda.is_available() else "cpu"
     device = torch.device(device)
-    labels = torch.tensor([6, 9, 6, 9, 4, 2, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9]).to(device)
+    labels = torch.tensor([6, 9, 6, 9, 4, 2, 0, 1]).to(device)
 
     # Set random seed
     seed = random.randint(1, 9999)  # 69
@@ -50,10 +50,10 @@ if __name__ == "__main__":
         img_resolution=img_size,
         in_channels=channels,
         out_channels=channels,
-        label_dim=10,
+        label_dim=0,
         augment_dim=9,
-        model_channels=16,
-        channel_mult=[1, 2, 2, 2],
+        model_channels=64,
+        channel_mult=[1, 2, 3, 4],
         num_blocks=1,
         attn_resolutions=[0]
     )

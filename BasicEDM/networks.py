@@ -357,7 +357,7 @@ class SongUNet(torch.nn.Module):
                 tmp = class_labels
                 if self.training and self.label_dropout:
                     tmp = tmp * (torch.rand([x.shape[0], 1], device=x.device) >= self.label_dropout).to(tmp.dtype)
-                emb = emb + self.label_emb(tmp)
+                emb = emb + self.label_emb(tmp * np.sqrt(self.map_label.in_features))
         '''if self.map_label is not None:
             tmp = class_labels
             if self.training and self.label_dropout:

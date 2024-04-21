@@ -11,6 +11,7 @@ from torchvision import datasets
 from torchvision.transforms.v2 import PILToTensor, ToTensor, Resize, Normalize, Compose, ToImage, ToDtype
 from torch.utils.data import Dataset, DataLoader
 from torch.optim import Adam
+import matplotlib.pyplot as plt
 
 import os
 import random
@@ -51,14 +52,14 @@ if __name__ == "__main__":
 
     # Parameters
     channels = 1        # Grayscale
-    batch_size = 8  # 16
+    batch_size = 16  # 16
     eval_batch_size = 16
     img_size = 256  # 32
     learning_rate = 1e-4  # 1e-4
-    n_steps = 5000
+    n_steps = 10000
     sampling_steps = 18
-    accumulation_steps = 1      # 16     # Option for gradient accumulation with very large datasets
-    warmup = 1000                   # How fast we increase the learning rate for the optimizer
+    accumulation_steps = 1      # 16     # Option for gradient accumulation with very large data
+    warmup = 2000                   # How fast we increase the learning rate for the optimizer
     resume_training = False
     resume_ckpt = "./output/train_mnist_2024-04-19_163852/checkpoints/ema_ckpt_4999.pth"
 
@@ -91,7 +92,7 @@ if __name__ == "__main__":
                                         [
                                             Resize(img_size),
                                             Compose([ToImage(), ToDtype(torch.float32, scale=True)]),
-                                            Normalize((0.5,), (0.5,))
+                                            #Normalize((0.5,), (0.5,))
                                         ]
                                     ))
     #training_data = FSCDataset(audio_dir=audio_dir, metadata_path=metadata_path, target_sample_rate=target_sample_rate, num_samples=target_sample_rate*seconds, image_resolution=img_size, device=device)
@@ -122,10 +123,10 @@ if __name__ == "__main__":
         img_resolution=img_size,
         in_channels=channels,
         out_channels=channels,
-        label_dim=0, # n_classes,
+        label_dim=0,  # n_classes,
         augment_dim=9,
-        model_channels=64,
-        channel_mult=[1, 2, 3, 4],
+        model_channels=16,
+        channel_mult=[1, 2, 2, 2],      # [1, 2, 3, 4]
         num_blocks=1,
         attn_resolutions=[0]
     )
@@ -157,12 +158,10 @@ if __name__ == "__main__":
             except Exception:
                 data_iterator = iter(dataloader)
                 img_batch, label_dict = next(data_iterator)
-            #import matplotlib.pyplot as plt
-            #plt.imshow(img_batch[0].squeeze())
-            #plt.show()
             img_batch = img_batch.to(device)
             label_dict = label_dict.to(device)
             loss = edm.train_one_step(img_batch, labels=label_dict) / accumulation_steps
+            #loss.sum().backward()
             loss.backward()
             batch_loss += loss
 
@@ -182,16 +181,9 @@ if __name__ == "__main__":
             time = datetime.now().strftime("%H:%M:%S")
             print(f"{time} -> Step: {step:08d}; Current Learning Rate: {optimizer.param_groups[0]['lr']:0.6f}; Average Loss: {train_loss / (step + 1):0.10f}; Batch Loss: {batch_loss.detach().item():0.10f}")
 
-        # Save sample image every 25% complete
-        if (step % (n_steps // 4) == 0 or step == n_steps - 1) and step > 0:
-            edm.model.eval()    # Switch to eval mode to take a sample
-            latents = torch.randn([eval_batch_size, channels, img_size, img_size]).to(device)
-            sample = edm_sampler(edm, latents, class_labels=label_tensor, num_steps=sampling_steps).detach().cpu()
-            torchvision.utils.save_image(tensor=(sample / 2 + 0.5).clamp(0, 1), fp=f"{sample_dir}/image_step_{step}.png")
-            edm.model.train()   # Back to training mode
-
         # Save model checkpoints at 25%, 50%, 75%, and 100% trained
-        if (step % (n_steps // 4) == 0 or step == n_steps - 1) and step > 0:
+        # Save model every 250 steps
+        if (step % 250 == 0 or step == n_steps - 1) and step > 0:  # (step % (n_steps // 4) == 0 or step == n_steps - 1) and step > 0:
             # Save a checkpoint with parameters stored
             torch.save({
                 'step': step,
@@ -203,6 +195,16 @@ if __name__ == "__main__":
             torch.save(edm.ema.state_dict(), f=f"{ckpt_dir}/ema_sample_{step}.pth")
             # Test alternate save method to load/sample from
             #torch.save(dict(net=edm, optimizer_state=optimizer.state_dict()), f=f"{ckpt_dir}/ema_alternate_{step}.pth")
+
+        # Save sample image every 25% complete
+        # Save sample image every 250 steps
+        if (step % 250 == 0 or step == n_steps - 1) and step > 0:  # (step % (n_steps // 4) == 0 or step == n_steps - 1) and step > 0:
+            edm.model.eval()  # Switch to eval mode to take a sample
+            latents = torch.randn([eval_batch_size, channels, img_size, img_size]).to(device)
+            sample = edm_sampler(edm, latents, class_labels=label_tensor, num_steps=sampling_steps).detach().cpu()
+            torchvision.utils.save_image(tensor=(sample / 2 + 0.5).clamp(0, 1),
+                                         fp=f"{sample_dir}/image_step_{step}.png")
+            edm.model.train()  # Back to training mode
 
         # Save fully trained models
         if step == n_steps - 1:
