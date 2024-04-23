@@ -4,11 +4,13 @@ from esc_dataset import ESCDataset
 from fsc_dataset import FSCDataset
 from rain_dataset import RainDataset
 from rainspec_dataset import RainSpecDataset
+from env_large_dataset import EnvDataset
 
 import torch
 import torchvision
 from torchvision import datasets
-from torchvision.transforms.v2 import PILToTensor, ToTensor, Resize, Normalize, Compose, ToImage, ToDtype
+from torchvision.transforms.v2 import RandomCrop, PILToTensor, ToTensor, Resize, Normalize, Compose, ToImage, ToDtype
+from torchvision.transforms.v2 import InterpolationMode
 from torch.utils.data import Dataset, DataLoader
 from torch.optim import Adam
 import matplotlib.pyplot as plt
@@ -46,23 +48,29 @@ if __name__ == "__main__":
     #audio_dir = "D:/datasets/ESC-mini"
     #audio_dir = "D:/datasets/FSC22/Audio Wise V1.0"
     #metadata_path = "D:/datasets/FSC22/Metadata V1.0 FSC22.csv"
-    img_dir = "D:/datasets/rain_spec"
+    #img_dir = "D:/datasets/rain_spec"
+    #audio_dir = "D:/datasets/ENV_DS-LARGE"
+    #audio_dir = "D:/datasets/ENV_DS-SMOL"
+    audio_dir = "D:/datasets/ENV_DS-CLEAN"
     target_sample_rate = 22050
-    seconds = 5
-    ret_type = "image"
+    # 3 seconds at 22050Hz results in a 128x130 spectrogram, and we can use 128x128 resolution
+    # 5 seconds at 22050Hz results in a 128x216 spectrogram, so we have to use 256x256 resolution
+    # Alternatively, just random crop to 128x128 to maintain full vertical resolution!
+    seconds = 3
+    img_size = 128  # 256  # 32
 
     # Parameters
     channels = 1        # Grayscale
-    batch_size = 16  # 16
-    eval_batch_size = 8
-    img_size = 256  # 32
+    batch_size = 128  # 16  # 16
+    #eval_batch_size = 4
+
     learning_rate = 1e-4  # 1e-4
-    n_steps = 10000
-    sampling_steps = 18
+    n_steps = 100000
+    sampling_steps = 32
     accumulation_steps = 1      # 16     # Option for gradient accumulation with very large data
-    warmup = 2000                   # How fast we increase the learning rate for the optimizer
-    resume_training = False
-    resume_ckpt = "./output/train_mnist_2024-04-19_163852/checkpoints/ema_ckpt_4999.pth"
+    warmup = 5000                   # How fast we increase the learning rate for the optimizer
+    resume_training = True
+    resume_ckpt = "./output/_OvernightSmall/checkpoints/edm_ckpt_49999.pth"
 
     # Setup output directory
     run_id = datetime.now().strftime("%Y-%m-%d_%H%M%S")
@@ -84,23 +92,13 @@ if __name__ == "__main__":
     random.seed(seed)
     torch.manual_seed(seed)
 
-    #training_data = download_mnist_training(img_size)
-    #mnist = download_mnist_training(img_size)
-    #training_data = ESCDataset(audio_dir=audio_dir, target_sample_rate=target_sample_rate, num_samples=target_sample_rate * seconds, image_resolution=img_size, device=device, ret_type=ret_type)
-    #training_data = RainDataset(audio_dir, target_sample_rate, target_sample_rate * seconds, img_size, device)
-    training_data = RainSpecDataset(img_dir,
-                                    torchvision.transforms.Compose(
-                                        [
-                                            Resize(img_size),
-                                            #Normalize((0.5,), (0.5,))
-                                        ]
-                                    ))
-    #training_data = FSCDataset(audio_dir=audio_dir, metadata_path=metadata_path, target_sample_rate=target_sample_rate, num_samples=target_sample_rate*seconds, image_resolution=img_size, device=device)
+    #transform = Resize((img_size, img_size), interpolation=InterpolationMode.BICUBIC, antialias=True)
+    transform = RandomCrop((img_size, img_size)).to(device)
+    training_data = EnvDataset(audio_dir, seconds=seconds, transform=transform)
 
-    #n_classes = len(training_data.classes)
-    # Labels to use for mid-training sampling
-    #label_tensor = torch.tensor([0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 1, 2, 3, 4, 5, 6]).to(device)
-    label_tensor = None  #torch.tensor([1, 1, 1, 1, 1, 2, 2, 4, 4, 10, 10, 10, 11, 11, 14, 14]).to(device)
+    n_classes = len(training_data.classes)
+    label_tensor = torch.tensor([i for i in range(n_classes)]).to(device)
+    eval_batch_size = n_classes         # Sample 4x per class
 
     # DataLoader
     dataloader = DataLoader(training_data, batch_size=batch_size, shuffle=True, pin_memory=True)
@@ -111,7 +109,7 @@ if __name__ == "__main__":
         img_resolution=img_size,
         in_channels=channels,
         out_channels=channels,
-        label_dim=0,  # n_classes,
+        label_dim=n_classes,
         augment_dim=9,
         model_channels=16,
         channel_mult=[1, 2, 3, 4],      # [1, 2, 3, 4]
@@ -128,10 +126,14 @@ if __name__ == "__main__":
     start_step = 0
     if resume_training:
         checkpoint = torch.load(resume_ckpt, map_location=device)
-        edm.ema.load_state_dict(checkpoint["model_state_dict"])
+        edm.model.load_state_dict(checkpoint["model_state_dict"])
+        edm.ema.load_state_dict(checkpoint["ema_state_dict"])
         optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
-        train_loss = checkpoint["train_loss"]
         start_step = checkpoint["step"]
+        for state in optimizer.state.values():
+            for k, v in state.items():
+                if isinstance(v, torch.Tensor):
+                    state[k] = v.to(device)
 
     edm.model.train()
     # Training Loop
@@ -171,22 +173,20 @@ if __name__ == "__main__":
             time = datetime.now().strftime("%H:%M:%S")
             print(f"{time} -> Step: {step:08d}; Current Learning Rate: {optimizer.param_groups[0]['lr']:0.6f}; Average Loss: {train_loss / (step + 1):0.10f}; Batch Loss: {batch_loss.detach().item():0.10f}")
 
-        # Save model checkpoints at 25%, 50%, 75%, and 100% trained
         # Save model every 500 steps
         if (step % 500 == 0 or step == n_steps - 1) and step > 0:  # (step % (n_steps // 4) == 0 or step == n_steps - 1) and step > 0:
             # Save a checkpoint with parameters stored
             torch.save({
                 'step': step,
-                'model_state_dict': edm.ema.state_dict(),
+                'model_state_dict': edm.model.state_dict(),
+                'ema_state_dict': edm.ema.state_dict(),
                 'optimizer_state_dict': optimizer.state_dict(),
                 'train_loss': train_loss
-            }, f=f"{ckpt_dir}/ema_ckpt_{step}.pth")
-            # Save a model to load from
+            }, f=f"{ckpt_dir}/edm_ckpt_{step}.pth")
+            # Save a model to sample from
+            torch.save(edm.model.state_dict(), f=f"{ckpt_dir}/model_sample_{step}.pth")
             torch.save(edm.ema.state_dict(), f=f"{ckpt_dir}/ema_sample_{step}.pth")
-            # Test alternate save method to load/sample from
-            #torch.save(dict(net=edm, optimizer_state=optimizer.state_dict()), f=f"{ckpt_dir}/ema_alternate_{step}.pth")
 
-        # Save sample image every 25% complete
         # Save sample image every 500 steps
         if (step % 500 == 0 or step == n_steps - 1) and step > 0:  # (step % (n_steps // 4) == 0 or step == n_steps - 1) and step > 0:
             edm.model.eval()  # Switch to eval mode to take a sample
@@ -196,18 +196,22 @@ if __name__ == "__main__":
             #                             fp=f"{sample_dir}/image_step_{step}.png")
             sample = edm_sampler(edm, latents, class_labels=label_tensor, num_steps=sampling_steps)
             # is the * 50 necessary? 2455 max luminance value
-            images_np = sample.to(torch.float32).cpu().numpy()  # .permute(0, 2, 3, 1).cpu().numpy()
+            images_np = sample.to(torch.float32).cpu().numpy()
             idx = 0
-            for img in images_np:
+            # Split samples by class
+            for img, label in zip(images_np, label_tensor):
+                if not os.path.exists(f"{sample_dir}/{label}"):
+                    os.makedirs(f"{sample_dir}/{label}", exist_ok=True)
                 im = Image.fromarray(img.squeeze()).convert("F")
-                im.save(f"{sample_dir}/image_step_{step}_{idx}.tiff")
+                im.save(f"{sample_dir}/{label}/image_step_{step}_{idx}.tiff")
+                #im.save(f"{sample_dir}/image_step_{step}_{idx}.tiff")
                 idx += 1
 
             edm.model.train()  # Back to training mode
 
         # Save fully trained models
         if step == n_steps - 1:
-            #torch.save(edm.model.state_dict(), f=f"{models_dir}/model_{step}_{run_id}.pth")
+            torch.save(edm.model.state_dict(), f=f"{models_dir}/model_{step}_{run_id}.pth")
             torch.save(edm.ema.state_dict(), f=f"{models_dir}/ema_{step}_{run_id}.pth")
 
     print("done done")

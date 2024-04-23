@@ -9,7 +9,7 @@ from torchaudio.transforms import Resample, MelSpectrogram
 import torchaudio.io
 import torchvision
 from torchvision.transforms import ToPILImage
-from torchvision.transforms.v2 import PILToTensor, ToTensor, Resize, Normalize, Compose, ToImage, ToDtype
+from torchvision.transforms.v2 import PILToTensor, ToTensor, Resize, Normalize, Compose, ToImage, ToDtype, RandomCrop
 
 import numpy as np
 import pandas as pd
@@ -30,7 +30,8 @@ class EnvDataset(Dataset):
             root_dir,
             target_sr=22050,
             seconds=1,            # Length of spectrograms to pad/trim to
-            transform=None
+            transform=None,
+            device=torch.device("cuda")
     ):
         self.root_dir = root_dir
         self.target_sr = target_sr
@@ -39,19 +40,22 @@ class EnvDataset(Dataset):
         self.classes = []
         self.data = []
         self.labels = []
+        self.device = device
         for folder in tqdm(os.listdir(self.root_dir), desc="Loading Data Classes..."):
             self.classes.append(folder)
             if os.path.isdir(root_dir + "/" + folder):
                 for file in os.listdir(root_dir + "/" + folder):
                     fp = os.path.join(root_dir, folder, file)
                     signal, sr = librosa.load(fp, sr=self.target_sr)
-                    signal = self._resize_signal(signal)
+                    #signal = self._resize_signal(signal)
                     spec = librosa.feature.melspectrogram(y=signal, sr=sr, n_mels=128)
                     spec /= 50          # Is this necessary when all done internally?
                     # Convert to PIL image
                     pil = Image.fromarray(spec).convert("F")
                     # Convert to torch image tensor
                     image = ToImage()(pil)
+                    #if self.transform is not None:
+                    #    image = self.transform(image)
                     self.data.append(image)
                     self.labels.append(folder)
 
@@ -59,7 +63,7 @@ class EnvDataset(Dataset):
         return len(self.data)
 
     def __getitem__(self, index):
-        image = self.data[index]
+        image = self.data[index] #.to(self.device)
         if self.transform:
             image = self.transform(image)
         return image, self.class_to_idx[self.labels[index]]
@@ -73,13 +77,14 @@ class EnvDataset(Dataset):
 
 
 if __name__ == "__main__":
-    root_dir = "D:/datasets/ENV_DS-LARGE"
-    transform = None # Resize(256)
-    env = EnvDataset(root_dir=root_dir, seconds=5, transform=transform)
+    root_dir = "D:/datasets/ENV_DS-CLEAN"
+    #transform = Resize((128, 128), interpolation=torchvision.transforms.v2.InterpolationMode.BICUBIC, antialias=True)      # W=216 px
+    transform = RandomCrop((128, 128)).to(device=torch.device("cuda"))
+    env = EnvDataset(root_dir=root_dir, seconds=3, transform=transform)
     for i in range(5):
         m = env[i][0]
         l = env[i][1]
-        img = np.array(m.squeeze()) * 50
+        img = np.array(m.cpu().data.squeeze()) * 50
         plt.imshow(img)
         plt.show()
         aud = librosa.feature.inverse.mel_to_audio(img, sr=22050, n_fft=2048, hop_length=512)
