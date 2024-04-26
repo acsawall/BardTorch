@@ -19,7 +19,7 @@ from tqdm import tqdm
 import matplotlib.pyplot as plt
 
 
-class EnvDataset(Dataset):
+class EnvSpecDataset(Dataset):
 
     @property
     def class_to_idx(self):
@@ -41,24 +41,18 @@ class EnvDataset(Dataset):
         self.data = []
         self.labels = []
         self.device = device
-        for folder in tqdm(os.listdir(self.root_dir), desc="Loading Dataset"):
+        for folder in tqdm(os.listdir(self.root_dir), desc="Loading Data Classes..."):
             self.classes.append(folder)
             if os.path.isdir(root_dir + "/" + folder):
                 for file in os.listdir(root_dir + "/" + folder):
                     fp = os.path.join(root_dir, folder, file)
-                    signal, sr = librosa.load(fp, sr=self.target_sr)
-                    #signal = self._resize_signal(signal)
-                    spec = librosa.feature.melspectrogram(y=signal, sr=sr, n_mels=128)
-                    spec /= 50          # Is this necessary when all done internally?
                     # Convert to PIL image
-                    pil = Image.fromarray(spec).convert("F")
+                    pil = Image.open(fp)
                     # Convert to torch image tensor
                     image = ToImage()(pil)
                     # Shrink vertical access to prevent RandomCrop from distorting frequencies
                     image = Resize(128, interpolation=torchvision.transforms.v2.InterpolationMode.BICUBIC,
                                    antialias=True)(image)
-                    #if self.transform is not None:
-                    #    image = self.transform(image)
                     self.data.append(image)
                     self.labels.append(folder)
 
@@ -80,22 +74,17 @@ class EnvDataset(Dataset):
 
 
 if __name__ == "__main__":
-    root_dir = "D:/datasets/ENV_DS-LARGE"
-    print("\n\n")
+    root_dir = "D:/datasets/ENV_DS-LARGESPEC"
     #transform = Resize((128, 128), interpolation=torchvision.transforms.v2.InterpolationMode.BICUBIC, antialias=True)      # W=216 px
     transform = RandomCrop((128, 128)).to(device=torch.device("cuda"))
-    env = EnvDataset(root_dir=root_dir, seconds=3, transform=transform)
-    print(f"Dataset at '{root_dir}' contains {len(env)} images across {len(env.classes)} classes\n\n")
-    assert False
-
+    env = EnvSpecDataset(root_dir=root_dir, seconds=3, transform=transform)
     for i in range(5):
         m = env[i][0]
         l = env[i][1]
-        img = np.array(m.cpu().data.squeeze()) * 50
+        img = np.array(m.cpu().data.squeeze())
         plt.imshow(img)
         plt.show()
         aud = librosa.feature.inverse.mel_to_audio(img, sr=22050, n_fft=2048, hop_length=512)
-
         plt.plot(aud)
         plt.show()
         import sounddevice as sd
