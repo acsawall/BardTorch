@@ -76,11 +76,8 @@ class EDiffusion(nn.Module):
     # Proposed forward function for preconditioning
     # https://github.com/NVlabs/edm/blob/main/training/networks.py#L654
     def get_denoiser(self, x, sigma, labels=None, use_ema=False, **kwargs):
-        #x = x.to(torch.float32)
-        #sigma.to(torch.float32).reshape(-1, 1, 1, 1)
         sigma[sigma == 0] = self.sigma_min      # set all zero points to sigma_min
         labels = labels if labels is not None else None
-        #labels = None if labels.size()[0] == 0 else torch.zeros([1, labels.size()[0]], device=x.device) if labels is None else labels.to(torch.float32).reshape(-1, labels.size()[0])
         c_skip = self.sigma_data ** 2 / (sigma ** 2 + self.sigma_data ** 2)
         c_out = sigma * self.sigma_data / (sigma ** 2 + self.sigma_data ** 2).sqrt()
         c_in = 1 / (self.sigma_data ** 2 + sigma ** 2).sqrt()
@@ -98,30 +95,7 @@ class EDiffusion(nn.Module):
 
         return torch.einsum('b,bijk->bijk', c_skip, x) + torch.einsum('b,bijk->bijk', c_out, model_out)
 
-        # NVIDIA's loss fn
-        '''x = x.to(torch.float32)
-        sigma = sigma.to(torch.float32).reshape(-1, 1, 1, 1)
-        c_skip = self.sigma_data ** 2 / (sigma ** 2 + self.sigma_data ** 2)
-        c_out = sigma * self.sigma_data / (sigma ** 2 + self.sigma_data ** 2).sqrt()
-        c_in = 1 / (self.sigma_data ** 2 + sigma ** 2).sqrt()
-        c_noise = sigma.log() / 4
-        if use_ema:
-            F_x = self.ema(c_in * x, c_noise.flatten(), class_labels=labels)
-        else:
-            F_x = self.model(c_in * x, c_noise.flatten(), class_labels=labels)
-        D_x = c_skip * x + c_out * F_x
-        return D_x'''
-
     def train_one_step(self, images, labels=None, augment_pipe=None, **kwargs):
-        # NVIDIA's preconditioning
-        '''rnd_normal = torch.randn([images.shape[0], 1, 1, 1], device=images.device)
-        sigma = (rnd_normal * self.P_std + self.P_mean).exp()
-        weight = (sigma ** 2 + self.sigma_data ** 2) / (sigma * self.sigma_data) ** 2
-        y, augment_labels = augment_pipe(images) if augment_pipe is not None else (images, None)
-        n = torch.randn_like(y) * sigma
-        D_yn = self.get_denoiser(y + n, sigma, labels=labels, augment_labels=augment_labels)
-        loss = weight * ((D_yn - y) ** 2)
-        return loss'''
         rnd_normal = torch.randn([images.shape[0]], device=images.device)
         sigma = (rnd_normal * self.P_std + self.P_mean).exp()
         weight = (sigma ** 2 + self.sigma_data ** 2) / ((sigma * self.sigma_data) ** 2)
@@ -148,6 +122,5 @@ class EDiffusion(nn.Module):
 
     # Helper method for edm_sampler, same as in NVIDIA's precondition
     # https://github.com/NVlabs/edm/blob/main/training/networks.py#L670
-    #@staticmethod
     def round_sigma(self, sigma):
         return torch.as_tensor(sigma)

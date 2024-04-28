@@ -1,24 +1,17 @@
-from audio_to_spec import get_melspec_db, spec_to_img, load_audio_from_tiff
-import librosa
 import librosa.feature
-import skimage.io
 import torch
 from torch.utils.data import Dataset
-import torchaudio
-from torchaudio.transforms import Resample, MelSpectrogram
-import torchaudio.io
 import torchvision
-from torchvision.transforms import ToPILImage
-from torchvision.transforms.v2 import PILToTensor, ToTensor, Resize, Normalize, Compose, ToImage, ToDtype, RandomCrop
+from torchvision.transforms.v2 import PILToTensor, Resize, ToImage, RandomCrop
 
 import numpy as np
-import pandas as pd
 import os
-from PIL import Image, ImageShow
+from PIL import Image
 from tqdm import tqdm
 import matplotlib.pyplot as plt
 
 
+# This class functions the same as env_large_dataset.py, but reads in .tiff spectrograms instead of audio files
 class EnvSpecDataset(Dataset):
 
     @property
@@ -60,17 +53,10 @@ class EnvSpecDataset(Dataset):
         return len(self.data)
 
     def __getitem__(self, index):
-        image = self.data[index] #.to(self.device)
+        image = self.data[index]
         if self.transform:
             image = self.transform(image)
         return image, self.class_to_idx[self.labels[index]]
-
-    def _resize_signal(self, signal):
-        if signal.shape[0] < self.seconds * self.target_sr:
-            signal = np.pad(signal, int(np.ceil((self.seconds * self.target_sr - signal.shape[0]) / 2)))
-        else:
-            signal = signal[:self.seconds * self.target_sr]
-        return signal
 
 
 if __name__ == "__main__":

@@ -1,76 +1,45 @@
+# Diffusion model and networks
 from edm import edm_sampler, EDiffusion
-from networks import SongUNet, DhariwalUNet
-from esc_dataset import ESCDataset
-from fsc_dataset import FSCDataset
-from rain_dataset import RainDataset
-from rainspec_dataset import RainSpecDataset
+from networks import DhariwalUNet
+
+# Datasets
 from env_large_dataset import EnvDataset
+from env_spec_dataset import EnvSpecDataset
 
+# PyTorch
 import torch
-import torchvision
-from torchvision import datasets
-from torchvision.transforms.v2 import RandomCrop, PILToTensor, ToTensor, Resize, Normalize, Compose, ToImage, ToDtype
-from torchvision.transforms.v2 import InterpolationMode
-from torch.utils.data import Dataset, DataLoader
+from torchvision.transforms.v2 import RandomCrop
+from torch.utils.data import DataLoader
 from torch.optim import Adam
-import matplotlib.pyplot as plt
 
+# Misc.
 import os
 import random
 from datetime import datetime
-from torchsummary import summary
 from PIL import Image
 
-
-def download_mnist_training(img_size):
-    train_data = datasets.MNIST(
-        root="data",
-        download=True,
-        train=True,
-        transform=torchvision.transforms.Compose(
-            [
-                Resize(img_size),
-                Compose([ToImage(), ToDtype(torch.float32, scale=True)]),
-                Normalize((0.5,), (0.5,))
-            ]
-        )
-    )
-    return train_data
-
-
 if __name__ == "__main__":
+    torch.backends.cudnn.benchmark = True
     device = "cuda" if torch.cuda.is_available() else "cpu"
     device = torch.device(device)
 
     # Dataset Params
-    #audio_dir = "D:/datasets/ESC-50"
-    #audio_dir = "D:/datasets/rain"
-    #audio_dir = "D:/datasets/ESC-mini"
-    #audio_dir = "D:/datasets/FSC22/Audio Wise V1.0"
-    #metadata_path = "D:/datasets/FSC22/Metadata V1.0 FSC22.csv"
-    #img_dir = "D:/datasets/rain_spec"
-    #audio_dir = "D:/datasets/ENV_DS-LARGE"
-    #audio_dir = "D:/datasets/ENV_DS-SMOL"
-    audio_dir = "D:/datasets/ENV_DS-CLEAN"
+    image_dir = "D:/datasets/ENV_DS-LARGESPEC"      # ENV_DS-LARGE already in .tiff format
     target_sample_rate = 22050
-    # 3 seconds at 22050Hz results in a 128x130 spectrogram, and we can use 128x128 resolution
-    # 5 seconds at 22050Hz results in a 128x216 spectrogram, so we have to use 256x256 resolution
-    # Alternatively, just random crop to 128x128 to maintain full vertical resolution!
-    seconds = 3
-    img_size = 128  # 256  # 32
+    img_size = 128
 
     # Parameters
-    channels = 1        # Grayscale
-    batch_size = 128  # 16  # 16
-    #eval_batch_size = 4
+    channels = 1                    # Grayscale
+    batch_size = 128
 
-    learning_rate = 1e-4  # 1e-4
-    n_steps = 100000
+    learning_rate = 1e-4
+    n_steps = 300000
     sampling_steps = 32
-    accumulation_steps = 1      # 16     # Option for gradient accumulation with very large data
     warmup = 5000                   # How fast we increase the learning rate for the optimizer
-    resume_training = True
-    resume_ckpt = "./output/_OvernightSmall/checkpoints/edm_ckpt_49999.pth"
+
+    # Options to resume training from a .pth or .pt checkpoint
+    resume_training = False
+    resume_ckpt = "./output/_OvernightLargeSpec240k/checkpoints/edm_ckpt_243000.pth"
 
     # Setup output directory
     run_id = datetime.now().strftime("%Y-%m-%d_%H%M%S")
@@ -83,8 +52,7 @@ if __name__ == "__main__":
     models_dir = f"output/complete_models"
     os.makedirs(models_dir, exist_ok=True)
 
-    # Set random seed
-    # TODO make this set-able
+    # Set seed
     seed = 69
     torch.manual_seed(seed)
     if device.type == "cuda":
@@ -92,13 +60,14 @@ if __name__ == "__main__":
     random.seed(seed)
     torch.manual_seed(seed)
 
-    #transform = Resize((img_size, img_size), interpolation=InterpolationMode.BICUBIC, antialias=True)
     transform = RandomCrop((img_size, img_size)).to(device)
-    training_data = EnvDataset(audio_dir, seconds=seconds, transform=transform)
-
+    #training_data = EnvDataset(audio_dir, seconds=seconds, transform=transform)
+    training_data = EnvSpecDataset(root_dir=image_dir, target_sr=target_sample_rate, transform=transform, device=device)
     n_classes = len(training_data.classes)
+
+    # Sample one of each class while training
     label_tensor = torch.tensor([i for i in range(n_classes)]).to(device)
-    eval_batch_size = n_classes         # Sample 4x per class
+    eval_batch_size = n_classes
 
     # DataLoader
     dataloader = DataLoader(training_data, batch_size=batch_size, shuffle=True, pin_memory=True)
@@ -110,10 +79,10 @@ if __name__ == "__main__":
         in_channels=channels,
         out_channels=channels,
         label_dim=n_classes,
-        augment_dim=9,
+        augment_dim=9,                  # Doesn't matter without an augment pipeline
         model_channels=16,
-        channel_mult=[1, 2, 3, 4],      # [1, 2, 3, 4]
-        num_blocks=1,
+        channel_mult=[1, 2, 3, 4],      # [1, 2, 3, 4] or [1, 2, 2, 2]
+        num_blocks=1,                   # Number residual blocks
         attn_resolutions=[0]
     )
     edm = EDiffusion(
@@ -124,6 +93,8 @@ if __name__ == "__main__":
     optimizer = Adam(edm.model.parameters(), lr=learning_rate)
     train_loss = 0
     start_step = 0
+
+    # Load model from checkpoint
     if resume_training:
         checkpoint = torch.load(resume_ckpt, map_location=device)
         edm.model.load_state_dict(checkpoint["model_state_dict"])
@@ -140,22 +111,18 @@ if __name__ == "__main__":
     print("### Starting Training ###")
     for step in range(start_step, n_steps):
         optimizer.zero_grad()
-        batch_loss = torch.tensor(0.0, device=device)
-        # TODO Gradient accumulation may not be needed for the ESC dataset
-        for _ in range(accumulation_steps):
-            try:
-                img_batch, label_dict = next(data_iterator)
-            except Exception:
-                data_iterator = iter(dataloader)
-                img_batch, label_dict = next(data_iterator)
-            #plt.imshow(img_batch[0].squeeze())
-            #plt.show()
-            img_batch = img_batch.to(device)
-            label_dict = label_dict.to(device)
-            loss = edm.train_one_step(img_batch, labels=label_dict) / accumulation_steps
-            #loss.sum().backward()
-            loss.backward()
-            batch_loss += loss
+        # Process image batch
+        try:
+            img_batch, label_dict = next(data_iterator)
+        # Throws NameError and StopIteration
+        except Exception:
+            data_iterator = iter(dataloader)
+            img_batch, label_dict = next(data_iterator)
+
+        img_batch = img_batch.to(device)
+        label_dict = label_dict.to(device)
+        loss = edm.train_one_step(img_batch, labels=label_dict)
+        loss.backward()
 
         # Update optimizer and unet weights
         for group in optimizer.param_groups:
@@ -164,17 +131,17 @@ if __name__ == "__main__":
             if param.grad is not None:
                 torch.nan_to_num(param.grad, nan=0, posinf=1e5, neginf=-1e5, out=param.grad)
         optimizer.step()
-        train_loss += batch_loss.detach().item()
+        train_loss += loss
 
         edm.update_exp_moving_avg(step=step, batch_size=batch_size)
 
         # Print progress every 250 steps
         if step % 250 == 0 or step == n_steps - 1:
             time = datetime.now().strftime("%H:%M:%S")
-            print(f"{time} -> Step: {step:08d}; Current Learning Rate: {optimizer.param_groups[0]['lr']:0.6f}; Average Loss: {train_loss / (step + 1):0.10f}; Batch Loss: {batch_loss.detach().item():0.10f}")
+            print(f"{time} -> Step: {step:08d}; Current Learning Rate: {optimizer.param_groups[0]['lr']:0.6f}; Average Loss: {train_loss / (step + 1):0.10f}; Batch Loss: {loss:0.10f}")
 
         # Save model every 500 steps
-        if (step % 500 == 0 or step == n_steps - 1) and step > 0:  # (step % (n_steps // 4) == 0 or step == n_steps - 1) and step > 0:
+        if (step % 500 == 0 or step == n_steps - 1) and step > 0:
             # Save a checkpoint with parameters stored
             torch.save({
                 'step': step,
@@ -188,14 +155,11 @@ if __name__ == "__main__":
             torch.save(edm.ema.state_dict(), f=f"{ckpt_dir}/ema_sample_{step}.pth")
 
         # Save sample image every 500 steps
-        if (step % 500 == 0 or step == n_steps - 1) and step > 0:  # (step % (n_steps // 4) == 0 or step == n_steps - 1) and step > 0:
+        if (step % 500 == 0 or step == n_steps - 1) and step > 0:
             edm.model.eval()  # Switch to eval mode to take a sample
-            latents = torch.randn([eval_batch_size, channels, img_size, img_size], device=device)#.to(device)
-            #sample = edm_sampler(edm, latents, class_labels=label_tensor, num_steps=sampling_steps).detach().cpu()
-            #torchvision.utils.save_image(tensor=(sample / 2 + 0.5).clamp(0, 1),
-            #                             fp=f"{sample_dir}/image_step_{step}.png")
+            # Init pure noise samples
+            latents = torch.randn([eval_batch_size, channels, img_size, img_size], device=device)
             sample = edm_sampler(edm, latents, class_labels=label_tensor, num_steps=sampling_steps)
-            # is the * 50 necessary? 2455 max luminance value
             images_np = sample.to(torch.float32).cpu().numpy()
             idx = 0
             # Split samples by class
@@ -204,7 +168,6 @@ if __name__ == "__main__":
                     os.makedirs(f"{sample_dir}/{label}", exist_ok=True)
                 im = Image.fromarray(img.squeeze()).convert("F")
                 im.save(f"{sample_dir}/{label}/image_step_{step}_{idx}.tiff")
-                #im.save(f"{sample_dir}/image_step_{step}_{idx}.tiff")
                 idx += 1
 
             edm.model.train()  # Back to training mode
