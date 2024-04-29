@@ -69,7 +69,7 @@ def denoise(data, sr, noise_sample=None, stationary=False):
 '''
 Denoise NonStationary: Crickets, Fireworks, Raindrops
 
-Denoise Stationary: Ocean, Rain, Thunderstorm, Wind, Birds
+Denoise Stationary: Ocean, Rain, Thunderstorm, Wind, Birds, Insects
 
 Maybe don't Denoise: Rain, Wind
 '''
@@ -85,17 +85,26 @@ if __name__ == "__main__":
     #silent_noise = "BasicEDM/output/_OvernightLargeSpec/samples/8/image_step_95500_8.tiff"
     noisy_noise = "noisefilters/noisy.tiff"
     quiet_noise = "noisefilters/quiet.tiff"
-    noise = load_audio_from_tiff(noisy_noise, target_sr, False)
+    medium_noise = "noisefilters/medium.tiff"
+    noise = load_audio_from_tiff(quiet_noise, target_sr, True)
     #sd.play(noise, target_sr)
     #sd.wait()
+    '''img_path = os.path.join("C:/Users/aidan/Desktop/Presentation Samples/Crickets/image_1_0.tiff")
+    aud = load_audio_from_tiff(img_path, target_sr, True)
+    aud = denoise(aud, target_sr, noise, True)
+    plt.plot(aud)
+    plt.show()
+    #sd.play(aud, target_sr)
+    #sd.wait()
+    sf.write(f"cricket_chirp.wav", aud, target_sr)'''
 
-    for file in os.listdir("BasicEDM/output/manual_samples"):
-        img_path = os.path.join("BasicEDM/output/manual_samples", file)
+    for file in os.listdir("C:/Users/aidan/Desktop/Presentation Samples/Insects"):
+        img_path = os.path.join("C:/Users/aidan/Desktop/Presentation Samples/Insects", file)
         aud = load_audio_from_tiff(img_path, target_sr, True)
         aud = denoise(aud, target_sr, noise, True)
         plt.plot(aud)
         plt.show()
-        sd.play(aud, target_sr)
-        sd.wait()
-        #sf.write(f"silence_filter_{file}.wav", aud, target_sr)
+        #sd.play(aud, target_sr)
+        #sd.wait()
+        sf.write(f"insect_{file}.wav", aud, target_sr)
 

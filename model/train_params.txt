@@ -1,0 +1,25 @@
+# Dataset Params
+target_sample_rate = 22050
+img_size = 128
+
+# Parameters
+channels = 1
+batch_size = 128
+
+learning_rate = 1e-4
+n_steps = 300000
+sampling_steps = 32
+accumulation_steps = 1
+warmup = 5000
+
+unet = DhariwalUNet(
+	img_resolution=img_size,
+	in_channels=channels,
+	out_channels=channels,
+	label_dim=n_classes,
+	augment_dim=9,
+	model_channels=16,
+	channel_mult=[1, 2, 3, 4],  # [1, 2, 3, 4]
+	num_blocks=1,
+	attn_resolutions=[0]
+)
